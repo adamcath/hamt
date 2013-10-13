@@ -10,7 +10,11 @@ public class HashedArrayMappedTrie<K, V>
 
     public HashedArrayMappedTrie()
     {
-        this.rootEntries = createEmptyEntries();
+        List<Entry<K, V>> empty = new ArrayList<Entry<K, V>>(32);
+        for (int i = 0; i < 32; i++)
+            empty.add(new ZerotonEntry());
+
+        this.rootEntries = empty;
     }
 
     private HashedArrayMappedTrie(List<Entry<K, V>> rootEntries)
@@ -35,7 +39,7 @@ public class HashedArrayMappedTrie<K, V>
         Entry<K, V> newEntry = oldEntry.putRecursively(hashIterator, value);
 
         return new HashedArrayMappedTrie<K, V>(
-                copyAndSet(rootEntries, firstHashChunk, newEntry));
+                CopyOnWrite.set(rootEntries, firstHashChunk, newEntry));
     }
 
     public int size()
@@ -65,37 +69,89 @@ public class HashedArrayMappedTrie<K, V>
         return result.toString();
     }
 
-    static abstract class Entry<K, V>
+    static class MultitonEntry<K, V> extends Entry<K, V>
     {
-        public abstract V lookupRecursively(HashChunker keyHash);
+        private final boolean[] map;
+        private final List<Entry<K, V>> entries;
 
-        public abstract Entry<K, V> putRecursively(HashChunker keyHash, V value);
+        public MultitonEntry()
+        {
+            this(new boolean[32], new ArrayList<Entry<K, V>>(0));
+        }
 
-        public abstract String dump(Indenter indenter);
+        private MultitonEntry(boolean[] map, List<Entry<K, V>> entries)
+        {
+            this.map = map;
+            this.entries = entries;
+        }
 
-        public abstract int size();
-    }
-
-    static class ZerotonEntry<K, V> extends Entry<K, V>
-    {
         public V lookupRecursively(HashChunker keyHash)
         {
-            return null;
+            int hashChunk = keyHash.next();
+            int entryIdx = hashToEntry(hashChunk);
+            if (entryIdx < 0)
+                return null;
+            else
+                return entries.get(entryIdx).lookupRecursively(keyHash);
         }
 
         public Entry<K, V> putRecursively(HashChunker keyHash, V value)
         {
-            return new SingletonEntry<K, V>(keyHash.rest(), value);
+            if (!keyHash.hasNext())
+                throw new HashCollisionException();
+
+            int hashChunk = keyHash.next();
+            int entryIdx = hashToEntry(hashChunk);
+            if (entryIdx < 0)
+            {
+                Entry<K, V> newEntry = new SingletonEntry<K, V>(keyHash.rest(), value);
+                return new MultitonEntry<K, V>(
+                        CopyOnWrite.set(map, hashChunk, true),
+                        CopyOnWrite.insert(entries, 0, newEntry));
+            }
+            else
+            {
+                Entry<K, V> oldEntry = entries.get(entryIdx);
+                Entry<K, V> newEntry = oldEntry.putRecursively(keyHash, value);
+                return new MultitonEntry<K, V>(
+                        map,
+                        CopyOnWrite.set(entries, entryIdx, newEntry));
+            }
+        }
+
+        private int hashToEntry(int hashChunk)
+        {
+            return map[hashChunk] ? countFlagsBelow(hashChunk, map) : -1;
         }
 
         public int size()
         {
-            return 0;
+            int result = 0;
+            for (Entry<K, V> entry : entries)
+                result += entry.size();
+            return result;
         }
 
         public String dump(Indenter indenter)
         {
-            return "-";
+            StringBuilder result = new StringBuilder().append("\n");
+            indenter.increment();
+            result.append(indenter.get()).append("[\n");
+            indenter.increment();
+            for (int i = 0; i < map.length; i++)
+            {
+                if (map[i])
+                {
+                    result.append(indenter.get())
+                            .append(String.format("%2x: ", i))
+                            .append(entries.get(hashToEntry(i)).dump(indenter))
+                            .append("\n");
+                }
+            }
+            indenter.decrement();
+            result.append(indenter.get()).append("]");
+            indenter.decrement();
+            return result.toString();
         }
     }
 
@@ -139,87 +195,38 @@ public class HashedArrayMappedTrie<K, V>
         }
     }
 
-    static class MultitonEntry<K, V> extends Entry<K, V>
+    static class ZerotonEntry<K, V> extends Entry<K, V>
     {
-        private final boolean[] map;
-        private final List<Entry<K, V>> entries;
-
-        public MultitonEntry()
-        {
-            this(new boolean[32], new ArrayList<Entry<K, V>>(0));
-        }
-
-        private MultitonEntry(boolean[] map, List<Entry<K, V>> entries)
-        {
-            this.map = map;
-            this.entries = entries;
-        }
-
         public V lookupRecursively(HashChunker keyHash)
         {
-            int hashChunk = keyHash.next();
-            int entryIdx = hashToEntry(hashChunk);
-            if (entryIdx < 0)
-                return null;
-            else
-                return entries.get(entryIdx).lookupRecursively(keyHash);
+            return null;
         }
 
         public Entry<K, V> putRecursively(HashChunker keyHash, V value)
         {
-            int hashChunk = keyHash.next();
-            int entryIdx = hashToEntry(hashChunk);
-            if (entryIdx < 0)
-            {
-                Entry<K, V> newEntry = new SingletonEntry<K, V>(keyHash.rest(), value);
-                return new MultitonEntry<K, V>(
-                        copyAndSet(map, hashChunk, true),
-                        copyAndInsert(entries, 0, newEntry));
-            }
-            else
-            {
-                Entry<K, V> oldEntry = entries.get(entryIdx);
-                Entry<K, V> newEntry = oldEntry.putRecursively(keyHash, value);
-                return new MultitonEntry<K, V>(
-                        map,
-                        copyAndSet(entries, entryIdx, newEntry));
-            }
-        }
-
-        private int hashToEntry(int hashChunk)
-        {
-            return map[hashChunk] ? countFlagsBelow(hashChunk, map) : -1;
+            return new SingletonEntry<K, V>(keyHash.rest(), value);
         }
 
         public int size()
         {
-            int result = 0;
-            for (Entry<K, V> entry : entries)
-                result += entry.size();
-            return result;
+            return 0;
         }
 
         public String dump(Indenter indenter)
         {
-            StringBuilder result = new StringBuilder().append("\n");
-            indenter.increment();
-            result.append(indenter.get()).append("[\n");
-            indenter.increment();
-            for (int i = 0; i < map.length; i++)
-            {
-                if (map[i])
-                {
-                    result.append(indenter.get())
-                            .append(String.format("%2x: ", i))
-                            .append(entries.get(hashToEntry(i)).dump(indenter))
-                            .append("\n");
-                }
-            }
-            indenter.decrement();
-            result.append(indenter.get()).append("]");
-            indenter.decrement();
-            return result.toString();
+            return "-";
         }
+    }
+
+    static abstract class Entry<K, V>
+    {
+        public abstract V lookupRecursively(HashChunker keyHash);
+
+        public abstract Entry<K, V> putRecursively(HashChunker keyHash, V value);
+
+        public abstract String dump(Indenter indenter);
+
+        public abstract int size();
     }
 
     static class HashChunker
@@ -253,6 +260,17 @@ public class HashedArrayMappedTrie<K, V>
         }
     }
 
+    static int countFlagsBelow(int index, boolean[] bitmap)
+    {
+        assert index < bitmap.length;
+
+        int nFlagsOn = 0;
+        for (int i = 0; i < index; i++)
+            if (bitmap[i])
+                nFlagsOn++;
+        return nFlagsOn;
+    }
+
     static class Indenter
     {
         private String indent = "";
@@ -271,50 +289,5 @@ public class HashedArrayMappedTrie<K, V>
         {
             indent = indent.substring(2);
         }
-    }
-
-    static int countFlagsBelow(int index, boolean[] bitmap)
-    {
-        assert index < bitmap.length;
-
-        int nFlagsOn = 0;
-        for (int i = 0; i < index; i++)
-            if (bitmap[i])
-                nFlagsOn++;
-        return nFlagsOn;
-    }
-
-    static <K, V> List<Entry<K, V>> copyAndSet(List<Entry<K, V>> entries, int index, Entry<K, V> newValue)
-    {
-        List<Entry<K, V>> newList = new ArrayList<Entry<K, V>>(entries.size());
-        for (int i = 0; i < entries.size(); i++)
-            newList.add(i == index ? newValue : entries.get(i));
-        return newList;
-    }
-
-    static <K, V> List<Entry<K, V>> copyAndInsert(List<Entry<K, V>> entries, int index, Entry<K, V> newValue)
-    {
-        List<Entry<K, V>> newList = new ArrayList<Entry<K, V>>(entries.size() + 1);
-        for (int i = 0; i < index; i++)
-            newList.add(entries.get(i));
-        newList.add(newValue);
-        for (int i = index; i < entries.size(); i++)
-            newList.add(entries.get(i));
-        return newList;
-    }
-
-    static boolean[] copyAndSet(boolean[] bitmask, int index, boolean newValue)
-    {
-        boolean[] newBitmask = Arrays.copyOf(bitmask, bitmask.length);
-        newBitmask[index] = newValue;
-        return newBitmask;
-    }
-
-    static <K, V> List<Entry<K, V>> createEmptyEntries()
-    {
-        List<Entry<K, V>> empty = new ArrayList<Entry<K, V>>(32);
-        for (int i = 0; i < 32; i++)
-            empty.add(new ZerotonEntry());
-        return empty;
     }
 }

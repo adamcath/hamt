@@ -1,4 +1,5 @@
 import org.junit.Test;
+import sun.jvm.hotspot.utilities.Assert;
 
 import static junit.framework.Assert.assertEquals;
 import static junit.framework.Assert.fail;
