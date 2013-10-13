@@ -69,7 +69,7 @@ public class HashedArrayMappedTrie<K, V>
         return result.toString();
     }
 
-    static class MultitonEntry<K, V> extends Entry<K, V>
+    static class MultitonEntry<K, V> implements Entry<K, V>
     {
         private final boolean[] map;
         private final List<Entry<K, V>> entries;
@@ -155,7 +155,7 @@ public class HashedArrayMappedTrie<K, V>
         }
     }
 
-    static class SingletonEntry<K, V> extends Entry<K, V>
+    static class SingletonEntry<K, V> implements Entry<K, V>
     {
         private final int hashCodeSuffix;
         private final V value;
@@ -195,7 +195,7 @@ public class HashedArrayMappedTrie<K, V>
         }
     }
 
-    static class ZerotonEntry<K, V> extends Entry<K, V>
+    static class ZerotonEntry<K, V> implements Entry<K, V>
     {
         public V lookupRecursively(HashChunker keyHash)
         {
@@ -218,15 +218,15 @@ public class HashedArrayMappedTrie<K, V>
         }
     }
 
-    static abstract class Entry<K, V>
+    static interface Entry<K, V>
     {
-        public abstract V lookupRecursively(HashChunker keyHash);
+        V lookupRecursively(HashChunker keyHash);
 
-        public abstract Entry<K, V> putRecursively(HashChunker keyHash, V value);
+        Entry<K, V> putRecursively(HashChunker keyHash, V value);
 
-        public abstract String dump(Indenter indenter);
+        String dump(Indenter indenter);
 
-        public abstract int size();
+        int size();
     }
 
     static class HashChunker
