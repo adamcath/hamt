@@ -36,7 +36,7 @@ public class HashedArrayMappedTrie<K, V>
         int firstHashChunk = hashIterator.next();
 
         Entry<K, V> oldEntry = rootEntries.get(firstHashChunk);
-        Entry<K, V> newEntry = oldEntry.putRecursively(hashIterator, value);
+        Entry<K, V> newEntry = oldEntry.insertRecursively(hashIterator, value);
 
         return new HashedArrayMappedTrie<K, V>(
                 CopyOnWrite.set(rootEntries, firstHashChunk, newEntry));
@@ -95,7 +95,7 @@ public class HashedArrayMappedTrie<K, V>
                 return entries.get(entryIdx).lookupRecursively(keyHash);
         }
 
-        public Entry<K, V> putRecursively(HashChunker keyHash, V value)
+        public Entry<K, V> insertRecursively(HashChunker keyHash, V value)
         {
             if (!keyHash.hasNext())
                 throw new HashCollisionException();
@@ -112,7 +112,7 @@ public class HashedArrayMappedTrie<K, V>
             else
             {
                 Entry<K, V> oldEntry = entries.get(entryIdx);
-                Entry<K, V> newEntry = oldEntry.putRecursively(keyHash, value);
+                Entry<K, V> newEntry = oldEntry.insertRecursively(keyHash, value);
                 return new MultitonEntry<K, V>(
                         map,
                         CopyOnWrite.set(entries, entryIdx, newEntry));
@@ -171,17 +171,17 @@ public class HashedArrayMappedTrie<K, V>
             return hashCodeSuffix == keyHash.rest() ? value : null;
         }
 
-        public Entry<K, V> putRecursively(HashChunker keyHash, V value)
+        public Entry<K, V> insertRecursively(HashChunker keyHash, V value)
         {
             if (keyHash.rest() == hashCodeSuffix)
                 throw new HashCollisionException();
 
-            return upgradeToMultiton().putRecursively(keyHash, value);
+            return upgradeToMultiton().insertRecursively(keyHash, value);
         }
 
         private Entry<K, V> upgradeToMultiton()
         {
-            return new MultitonEntry<K, V>().putRecursively(new HashChunker(hashCodeSuffix), value);
+            return new MultitonEntry<K, V>().insertRecursively(new HashChunker(hashCodeSuffix), value);
         }
 
         public int size()
@@ -202,7 +202,7 @@ public class HashedArrayMappedTrie<K, V>
             return null;
         }
 
-        public Entry<K, V> putRecursively(HashChunker keyHash, V value)
+        public Entry<K, V> insertRecursively(HashChunker keyHash, V value)
         {
             return new SingletonEntry<K, V>(keyHash.rest(), value);
         }
@@ -222,7 +222,7 @@ public class HashedArrayMappedTrie<K, V>
     {
         V lookupRecursively(HashChunker keyHash);
 
-        Entry<K, V> putRecursively(HashChunker keyHash, V value);
+        Entry<K, V> insertRecursively(HashChunker keyHash, V value);
 
         String dump(Indenter indenter);
 
